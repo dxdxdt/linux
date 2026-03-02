@@ -634,6 +634,7 @@ static ssize_t exfat_file_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file_inode(file);
 	struct exfat_inode_info *ei = EXFAT_I(inode);
+	struct exfat_sb_info *sbi = EXFAT_SB(inode->i_sb);
 	loff_t pos = iocb->ki_pos;
 	loff_t valid_size;
 
@@ -662,13 +663,21 @@ static ssize_t exfat_file_write_iter(struct kiocb *iocb, struct iov_iter *iter)
 	}
 
 	if (pos > valid_size) {
+		loff_t max_growth = sbi->options.max_validdata_growth;
+		int zrun = 0;
+
+		if (max_growth && max_growth < pos - valid_size) {
+			zrun = 1;
+			pos = valid_size + max_growth;
+		}
+
 		ret = exfat_extend_valid_size(inode, pos);
 		if (ret < 0 && ret != -ENOSPC) {
 			exfat_err(inode->i_sb,
-				"write: fail to zero from %llu to %llu(%zd)",
-				valid_size, pos, ret);
+				"write: fail to zero from %llu to %llu(%zd), zrun=%d",
+				valid_size, pos, ret, zrun);
 		}
-		if (ret < 0)
+		if (ret < 0 || zrun)
 			goto unlock;
 	}
 

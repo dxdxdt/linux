@@ -149,6 +149,8 @@ static int exfat_show_options(struct seq_file *m, struct dentry *root)
 		seq_printf(m, ",time_offset=%d", opts->time_offset);
 	if (opts->zero_size_dir)
 		seq_puts(m, ",zero_size_dir");
+	if (opts->max_validdata_growth)
+		seq_printf(m, ",max_validdata_growth=%llu", opts->max_validdata_growth);
 	return 0;
 }
 
@@ -229,6 +231,7 @@ enum {
 	Opt_sys_tz,
 	Opt_time_offset,
 	Opt_zero_size_dir,
+	Opt_max_validdata_growth,
 
 	/* Deprecated options */
 	Opt_utf8,
@@ -258,6 +261,7 @@ static const struct fs_parameter_spec exfat_parameters[] = {
 	fsparam_flag("sys_tz",			Opt_sys_tz),
 	fsparam_s32("time_offset",		Opt_time_offset),
 	fsparam_flag_no("zero_size_dir",	Opt_zero_size_dir),
+	fsparam_u64("max_validdata_growth",	Opt_max_validdata_growth),
 	__fsparam(NULL, "utf8",			Opt_utf8, fs_param_deprecated,
 		  NULL),
 	__fsparam(NULL, "debug",		Opt_debug, fs_param_deprecated,
@@ -328,6 +332,9 @@ static int exfat_parse_param(struct fs_context *fc, struct fs_parameter *param)
 		break;
 	case Opt_zero_size_dir:
 		opts->zero_size_dir = !result.negated;
+		break;
+	case Opt_max_validdata_growth:
+		opts->max_validdata_growth = result.uint_64;
 		break;
 	case Opt_utf8:
 	case Opt_debug:

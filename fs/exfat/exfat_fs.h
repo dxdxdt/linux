@@ -239,6 +239,20 @@ struct exfat_mount_options {
 	int time_offset; /* Offset of timestamps from UTC (in minutes) */
 	/* Support creating zero-size directory, default: false */
 	bool zero_size_dir;
+	/*
+	 * Limit the growth of the valid data length(VDL) in one write() syscall
+	 *
+	 * If set to non-zero, when the file offset is past the VDL and implicit
+	 * zeroing incurred would be more than the option value, write() returns
+	 * zero and the VDL is extended only by the value. This allows userspace
+	 * applications to abandon IO tasks upon user cancellation or interrupt.
+	 *
+	 * Technically speaking, this behaviour is allowed in POSIX. However,
+	 * due to historic reasons in Linux, the use of this option will break
+	 * many userspace applications that treat the case where write()
+	 * returning zero as ENOSPC.
+	 */
+	u64 max_validdata_growth;
 };
 
 /*
