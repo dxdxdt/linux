@@ -799,8 +799,85 @@ static ssize_t exfat_splice_read(struct file *in, loff_t *ppos,
 	return filemap_splice_read(in, ppos, pipe, len, flags);
 }
 
+/*
+ * A special SEEK_DATA and SEEK_HOLE handler that treats the unwritten range
+ * between the VDL(valid data length) and EOF as a hole. Since the VDL in exFAT
+ * is not required to be aligned to any block boundary and holes in extent-based
+ * filesystems are typically aligned to a certain block size, we try our best to
+ * align the VDL to the device block size as not to confuse any userland
+ * programs that may depend on that assumption.
+ *
+ * The function will treat the last block containing data as the last data block
+ * and the block that follows immediately after as the start of the hole leading
+ * up to EOF. The last data block may have some unwritten bytes, but that's only
+ * O(1) write amplification.
+ */
+static loff_t exfat_vdl_llseek(struct file *file, loff_t offset, int whence)
+{
+	struct inode *inode = file->f_mapping->host;
+	struct super_block *sb = inode->i_sb;
+	struct exfat_inode_info *ei = EXFAT_I(inode);
+	loff_t maxbytes = inode->i_sb->s_maxbytes;
+	loff_t datasize;
+	loff_t size;
+
+	inode_lock(inode);
+
+	size = i_size_read(inode);
+
+	/* Same check found in iomap_seek_*() */
+	if (offset < 0 || offset >= size) {
+		offset = -ENXIO;
+		goto out;
+	}
+
+	if (ei->valid_size > 0) {
+		/* align to block size, clamp to isize */
+		datasize = EXFAT_B_TO_BLK_ROUND_UP(ei->valid_size, sb);
+		datasize = EXFAT_BLK_TO_B(datasize, sb);
+		if (datasize > size)
+			datasize = size;
+	}
+	else
+		datasize = 0;
+
+	if (whence == SEEK_DATA) {
+		/*
+		 * As exFAT does not support sparse files, SEEK_DATA is pretty
+		 * much useless. But still, to be compliant, SEEK_DATA shouldn't
+		 * work if the offset is in a hole.
+		 */
+		if (offset >= datasize)
+			offset = -ENXIO;
+	}
+	else if (whence == SEEK_HOLE) {
+		if (offset < datasize)
+			offset = datasize;
+	}
+	else
+		BUG();
+
+out:
+	inode_unlock(inode);
+
+	if (offset < 0) {
+		return offset;
+	}
+
+	return vfs_setpos(file, offset, maxbytes);
+}
+
+static loff_t exfat_file_llseek(struct file *file, loff_t offset, int whence)
+{
+	if (whence == SEEK_DATA || whence == SEEK_HOLE) {
+		return exfat_vdl_llseek(file, offset, whence);
+	}
+
+	return generic_file_llseek(file, offset, whence);
+}
+
 const struct file_operations exfat_file_operations = {
-	.llseek		= generic_file_llseek,
+	.llseek		= exfat_file_llseek,
 	.read_iter	= exfat_file_read_iter,
 	.write_iter	= exfat_file_write_iter,
 	.unlocked_ioctl = exfat_ioctl,
